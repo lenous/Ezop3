@@ -141,6 +141,21 @@ function normalizeLogin(login) {
   return String(login || '').trim().toLowerCase();
 }
 
+function normalizeLoginLookup(value) {
+  return normalizeLogin(value)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ');
+}
+
+function resolveLoginUser(login) {
+  const key = normalizeLoginLookup(login);
+  return USERS.find(user =>
+    normalizeLoginLookup(user.login) === key ||
+    normalizeLoginLookup(user.name) === key
+  );
+}
+
 function loadUserPasswords() {
   try {
     const raw = localStorage.getItem(USER_CREDENTIALS_KEY);
@@ -473,7 +488,8 @@ function updateRememberedLogin(login) {
 }
 
 function doLogin() {
-  const u = normalizeLogin(document.getElementById('login-user').value);
+  const rawLogin = document.getElementById('login-user').value;
+  const u = normalizeLogin(rawLogin);
   const p = document.getElementById('login-pass').value;
   const guard = loginGuardStatus(u);
   if (guard.locked) {
@@ -481,8 +497,8 @@ function doLogin() {
       `Příliš mnoho pokusů. Zkuste to znovu za ${guard.remainingSec} s.`;
     return;
   }
-  const found = USERS.find(x => normalizeLogin(x.login) === u && passwordForUser(x) === p);
-  if (!found) {
+  const found = resolveLoginUser(rawLogin);
+  if (!found || passwordForUser(found) !== p) {
     registerLoginFailure(u);
     recordLoginEvent(u || '(prazdne)', null, false);
     document.getElementById('login-error').textContent = 'Nesprávné přihlašovací jméno nebo heslo.';
@@ -490,8 +506,8 @@ function doLogin() {
   }
   currentUser = found;
   clearLoginFailures(u);
-  updateRememberedLogin(u);
-  recordLoginEvent(u, found, true);
+  updateRememberedLogin(found.login);
+  recordLoginEvent(found.login, found, true);
   document.getElementById('login-error').textContent = '';
   document.getElementById('login-screen').style.display = 'none';
   document.getElementById('app').style.display = 'flex';
@@ -1436,9 +1452,6 @@ function renderStationDetail(stInfo) {
       <span class="badge ${statusMeta.badge}" style="margin-left:auto">${statusMeta.label}</span>
     </div>
 
-    ${productPhotoCardHtml(selectedOrder, true)}
-    ${stationProgramCardHtml(selectedOrder, selectedStation, stInfo)}
-
     <!-- QTY -->
     <div class="card">
       <div class="card-title">📦 Počty kusů</div>
@@ -1473,6 +1486,9 @@ function renderStationDetail(stInfo) {
       </div>
       ${renderStationNotes()}
     </div>
+
+    ${stationProgramCardHtml(selectedOrder, selectedStation, stInfo)}
+    ${productPhotoCardHtml(selectedOrder, true)}
   `;
   updateQtySummary();
 }
