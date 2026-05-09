@@ -132,6 +132,7 @@ function startCloudRealtime() {
 // ── USERS ──────────────────────────────────────────────
 let USERS = cloneDefault('users') || [];
 const ROLE_LABELS = cloneDefault('roleLabels') || {};
+const BUILTIN_USER_ROLES = Object.fromEntries(USERS.map(u => [normalizeLogin(u.login), u.role]));
 const DEFAULT_DEMO_PASSWORD = '1234';
 const USER_CREDENTIALS_KEY = 'vyrobais-creds-v2';
 
@@ -150,10 +151,9 @@ function normalizeLoginLookup(value) {
 
 function resolveLoginUser(login) {
   const key = normalizeLoginLookup(login);
-  return USERS.find(user =>
-    normalizeLoginLookup(user.login) === key ||
-    normalizeLoginLookup(user.name) === key
-  );
+  return USERS.find(user => normalizeLoginLookup(user.login) === key) ||
+    USERS.find(user => BUILTIN_USER_ROLES[normalizeLogin(user.login)] && normalizeLoginLookup(user.name) === key) ||
+    USERS.find(user => normalizeLoginLookup(user.name) === key);
 }
 
 function loadUserPasswords() {
@@ -213,6 +213,8 @@ function sanitizeUserProfile(u) {
 
 function mergeUserProfiles(profiles) {
   profiles.map(sanitizeUserProfile).filter(Boolean).forEach(profile => {
+    const lockedRole = BUILTIN_USER_ROLES[profile.login];
+    if (lockedRole) profile.role = lockedRole;
     const existing = USERS.find(u => u.id === profile.id || normalizeLogin(u.login) === profile.login);
     if (existing) Object.assign(existing, profile);
     else USERS.push(profile);
@@ -505,6 +507,8 @@ function doLogin() {
     return;
   }
   currentUser = found;
+  const lockedRole = BUILTIN_USER_ROLES[normalizeLogin(found.login)];
+  if (lockedRole) currentUser.role = lockedRole;
   clearLoginFailures(u);
   updateRememberedLogin(found.login);
   recordLoginEvent(found.login, found, true);
@@ -532,7 +536,7 @@ function doLogout() {
 
 // ── ROLE PERMISSIONS ──────────────────────────────────
 function can(action) {
-  const r = currentUser?.role;
+  const r = BUILTIN_USER_ROLES[normalizeLogin(currentUser?.login)] || currentUser?.role;
   const perms = {
     view_orders:    ['operator','tpv','dispatcher','management','admin'],
     edit_qty:       ['operator','tpv','dispatcher','management','admin'],
@@ -701,7 +705,7 @@ function issueCardHtml(i, canResolve) {
   const ago  = Math.round((Date.now() - time.getTime()) / 60000);
   const agoTxt = ago < 1 ? 'právě teď' : ago < 60 ? `před ${ago} min` : `před ${Math.round(ago/60)} h`;
 
-  return `<div class="card" style="border-left:4px solid ${sevColor};${i.resolved?'opacity:.55':''}">
+  return `<div class="card" style="border-left:4px solid ${sevColor};${i.resolved?'opacity:.55':''};cursor:pointer" onclick="openIssueTarget('${i.id}')">
     <div style="display:flex;align-items:flex-start;gap:10px;margin-bottom:8px">
       <div style="font-size:24px">${i.stationIcon}</div>
       <div style="flex:1">
@@ -720,11 +724,21 @@ function issueCardHtml(i, canResolve) {
       ${i.resolved
         ? `<span style="color:var(--green)">✅ Vyřešil ${i.resolvedBy}</span>`
         : canResolve
-          ? `<button class="btn btn-teal btn-sm" onclick="resolveIssue('${i.id}')">✓ Označit vyřešeno</button>`
+          ? `<button class="btn btn-teal btn-sm" onclick="event.stopPropagation();resolveIssue('${i.id}')">✓ Označit vyřešeno</button>`
           : `<span style="color:var(--amber)">⏳ Čeká na vyřešení</span>`
       }
     </div>
   </div>`;
+}
+
+function openIssueTarget(issueId) {
+  const issue = ISSUES.find(i => i.id === issueId);
+  if (!issue) return;
+  const order = ORDERS.find(o => o.id === issue.orderId);
+  const station = order?.stations.find(s => Number(s.stId) === Number(issue.stationId));
+  if (order && station) openStation(order.id, station.stId);
+  else if (order) openOrder(order.id);
+  else showToast('Zakázka k problému už v aplikaci není.');
 }
 
 function visibleIssues() {
@@ -2081,6 +2095,11 @@ function renderKpi() {
 // ── ADMIN ─────────────────────────────────────────────
 let adminTab = 'users';
 function renderAdmin() {
+  if (!can('app_settings')) {
+    navigateTo('dashboard');
+    showToast('🚫 Nemáte oprávnění ke správě aplikace.');
+    return;
+  }
   document.getElementById('page-admin').innerHTML = `
     <div style="padding:12px 0 8px;font-size:16px;font-weight:800;color:var(--gold)">⚙️ Správa aplikace</div>
     <div class="admin-tabs">
@@ -2506,6 +2525,10 @@ const DEFAULT_STATIONS = [1,2,3,4,5,6,7,8,9];
 let pickedStations = DEFAULT_STATIONS.slice();
 
 function newOrderModal() {
+  if (!can('create_order')) {
+    showToast('🚫 Nemáte oprávnění vytvořit zakázku.');
+    return;
+  }
   pendingDocs = [];
   pickedStations = DEFAULT_STATIONS.slice();
   const today = new Date().toISOString().slice(0,10);
