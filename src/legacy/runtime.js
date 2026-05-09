@@ -581,7 +581,7 @@ async function initApp() {
 
 // ── NAVIGATION ────────────────────────────────────────
 function getNavItems() {
-  const openIssueCount = ISSUES.filter(i => !i.resolved).length;
+  const openIssueCount = visibleIssues().filter(i => !i.resolved).length;
   const items = [
     { id:'dashboard', label:'Přehled',  icon:'🏠' },
     { id:'orders',    label:'Zakázky',  icon:'📋' },
@@ -657,8 +657,9 @@ function refreshCurrentView() {
 
 // ── ISSUES PAGE (visible to ALL users) ────────────────
 function renderIssues() {
-  const open = ISSUES.filter(i => !i.resolved);
-  const closed = ISSUES.filter(i => i.resolved);
+  const issues = visibleIssues();
+  const open = issues.filter(i => !i.resolved);
+  const closed = issues.filter(i => i.resolved);
   const isManager = ['admin','dispatcher','management'].includes(currentUser.role);
 
   document.getElementById('page-issues').innerHTML = `
@@ -726,6 +727,14 @@ function issueCardHtml(i, canResolve) {
   </div>`;
 }
 
+function visibleIssues() {
+  return ISSUES.filter(issue =>
+    !Array.isArray(issue.targetRoles) ||
+    issue.targetRoles.includes(currentUser?.role) ||
+    issue.reportedByRole === currentUser?.role
+  );
+}
+
 // ── DASHBOARD ─────────────────────────────────────────
 function renderDashboard() {
   const total = ORDERS.length;
@@ -756,7 +765,7 @@ function renderDashboard() {
         <div class="stat-lbl">Ve výrobě</div>
       </div>
       <div class="stat-card" style="cursor:pointer" onclick="navigateTo('issues')">
-        <div class="stat-val" style="color:var(--red)">${ISSUES.filter(i=>!i.resolved).length || issues}</div>
+        <div class="stat-val" style="color:var(--red)">${visibleIssues().filter(i=>!i.resolved).length || issues}</div>
         <div class="stat-lbl">Problémy</div>
       </div>
       <div class="stat-card" style="cursor:pointer" onclick="showOrdersFiltered('urgent')">
@@ -794,7 +803,7 @@ function renderDashboard() {
     </div>
 
     ${(() => {
-      const openIssues = ISSUES.filter(i => !i.resolved);
+      const openIssues = visibleIssues().filter(i => !i.resolved);
       if (openIssues.length === 0 && issues === 0) return '';
       return `<div class="card" style="border-left:3px solid var(--red);cursor:pointer" onclick="navigateTo('issues')">
         <div class="card-title" style="color:var(--red)">⚠️ Hlášené problémy (${openIssues.length})</div>
@@ -1574,16 +1583,26 @@ function updateQtySummary() {
 
 function saveQty() {
   if (!selectedStation) return;
+  const result = persistStationCounts();
+  if (result?.ok) {
+    showToast(result.message || '✅ Počty uloženy');
+  }
+}
+
+function persistStationCounts(options = {}) {
   const v = qtyValidation();
   if (v.exceed) {
     showToast(`⛔ Nelze uložit: součet ${v.sum} ks > vydáno ${v.available} ks`);
-    return;
+    return { ok: false };
   }
-  updateStationStatusFromQty(v);
+  if (options.forceCompleted) selectedStation.status = 'completed';
+  else updateStationStatusFromQty(v);
+  const missingCheckMessage = createMissingPreviousCheckAlert();
   const releaseMessage = autoReleaseToNextStation();
   const stInfo = STATIONS.find(x => x.id === selectedStation.stId);
   renderStationDetail(stInfo);
-  showToast(releaseMessage ? `✅ Počty uloženy. ${releaseMessage}` : '✅ Počty uloženy');
+  const parts = [options.message || '✅ Počty uloženy', releaseMessage, missingCheckMessage].filter(Boolean);
+  return { ok: true, message: parts.join(' ') };
 }
 
 function resetQty() {
@@ -1596,6 +1615,17 @@ function resetQty() {
 function setStatus(newStatus) {
   if (!selectedStation) return;
   if (newStatus === 'issue') { reportIssueModal(); return; }
+  if (newStatus === 'completed') {
+    selectedStation.qtyOk = qtyAvailable();
+    selectedStation.qtyRework = 0;
+    selectedStation.qtyScrap = 0;
+    const result = persistStationCounts({
+      forceCompleted: true,
+      message: '✅ Stanoviště dokončeno. Doplněn plný počet OK kusů.',
+    });
+    if (result?.ok) showToast(result.message);
+    return;
+  }
   selectedStation.status = newStatus;
   const stInfo = STATIONS.find(x => x.id === selectedStation.stId);
   renderStationDetail(stInfo);
@@ -1613,6 +1643,46 @@ function nextStationAfterCurrent() {
   if (!selectedOrder || !selectedStation) return null;
   const idx = selectedOrder.stations.findIndex(s => s.stId === selectedStation.stId);
   return idx >= 0 ? selectedOrder.stations[idx + 1] : null;
+}
+
+function previousStationBeforeCurrent() {
+  if (!selectedOrder || !selectedStation) return null;
+  const idx = selectedOrder.stations.findIndex(s => s.stId === selectedStation.stId);
+  return idx > 0 ? selectedOrder.stations[idx - 1] : null;
+}
+
+function processedQty(station) {
+  return (Number(station?.qtyOk) || 0) + (Number(station?.qtyRework) || 0) + (Number(station?.qtyScrap) || 0);
+}
+
+function createMissingPreviousCheckAlert() {
+  if ((Number(selectedStation?.qtyOk) || 0) <= 0) return '';
+  const previous = previousStationBeforeCurrent();
+  if (!previous || processedQty(previous) > 0) return '';
+  const key = `missing-prev-check:${selectedOrder.id}:${previous.stId}:${selectedStation.stId}`;
+  if (ISSUES.some(issue => issue.autoKey === key && !issue.resolved)) return '⚠️ Upozornění na chybějící předchozí kontrolu už bylo odesláno.';
+
+  const prevInfo = STATIONS.find(x => x.id === previous.stId);
+  const stInfo = STATIONS.find(x => x.id === selectedStation.stId);
+  ISSUES.unshift({
+    id: 'iss' + Date.now(),
+    autoKey: key,
+    orderId: selectedOrder.id,
+    orderName: selectedOrder.name,
+    orderNumber: selectedOrder.number,
+    stationId: selectedStation.stId,
+    stationName: stInfo?.name ?? '',
+    stationIcon: stInfo?.icon ?? '⚠️',
+    severity: 'medium',
+    description: `Na stanovišti ${stInfo?.name || selectedStation.stId} byly zapsány OK kusy, ale předchozí stanoviště ${prevInfo?.name || previous.stId} nemá zapsanou kontrolu.`,
+    reportedBy: 'Systém',
+    reportedByRole: 'admin',
+    targetRoles: ['admin','dispatcher','management','tpv'],
+    reportedAt: new Date().toISOString(),
+    resolved: false,
+  });
+  buildNav();
+  return '⚠️ Odesláno upozornění: předchozí stanoviště nemá zapsanou kontrolu.';
 }
 
 function notifyNextStation(nextStation, qtyReady) {
@@ -1652,13 +1722,25 @@ const NOTE_TYPES = {
   info:     { label:'Informace',         icon:'ℹ️', color:'#3b82f6' },
   storage:  { label:'Umístění / sklad',  icon:'📍', color:'#22c55e' },
   material: { label:'Materiál / náhrada',icon:'🔧', color:'#a855f7' },
+  message:  { label:'Vzkaz',             icon:'💬', color:'#22b8a6' },
   change:   { label:'Změna výroby',      icon:'🔁', color:'#f59e0b' },
   other:    { label:'Ostatní',           icon:'📝', color:'#999' },
 };
 
 function stationNotes(orderId, stationId) {
-  return PROD_NOTES.filter(n => n.orderId === orderId && n.stationId === stationId)
+  return PROD_NOTES.filter(n => {
+    if (n.orderId !== orderId) return false;
+    if (Array.isArray(n.targetRoles) && !n.targetRoles.includes(currentUser?.role) && n.authorRole !== currentUser?.role) return false;
+    return n.targetScope === 'all' || Number(n.stationId) === Number(stationId);
+  })
     .sort((a,b) => new Date(b.createdAt) - new Date(a.createdAt));
+}
+
+function noteRecipientLabel(note) {
+  if (note.targetScope === 'all') return 'Všem stanovištím';
+  if (Array.isArray(note.targetRoles)) return 'Role: ' + note.targetRoles.map(r => ROLE_LABELS[r] || r).join(', ');
+  const st = STATIONS.find(x => x.id === Number(note.stationId));
+  return st ? `Pro: ${st.icon} ${st.name}` : '';
 }
 
 function renderStationNotes() {
@@ -1678,6 +1760,7 @@ function renderStationNotes() {
         <span style="font-size:11px;font-weight:700;color:${t.color}">${t.icon} ${t.label}</span>
         <span style="font-size:10px;color:var(--text3)">${agoTxt}</span>
       </div>
+      ${noteRecipientLabel(n) ? `<div style="font-size:10px;color:var(--text2);margin-bottom:5px">${escapeHtml(noteRecipientLabel(n))}</div>` : ''}
       <div style="font-size:13px;color:var(--text);line-height:1.4;margin-bottom:6px">${escapeHtml(n.text)}</div>
       <div style="display:flex;align-items:center;justify-content:space-between;font-size:10px;color:var(--text2)">
         <span>👤 ${n.author}</span>
@@ -1701,7 +1784,19 @@ function addNoteModal() {
       <div class="input-label">Typ poznámky</div>
       <select class="input" id="an-type">
         ${Object.entries(NOTE_TYPES).map(([k,v]) =>
-          `<option value="${k}" ${k==='storage'?'selected':''}>${v.icon} ${v.label}</option>`).join('')}
+          `<option value="${k}" ${k==='message'?'selected':''}>${v.icon} ${v.label}</option>`).join('')}
+      </select>
+    </div>
+
+    <div class="input-group">
+      <div class="input-label">Adresát</div>
+      <select class="input" id="an-target">
+        <option value="current">Aktuální stanoviště - ${stInfo?.name || ''}</option>
+        <option value="all">Všem stanovištím zakázky</option>
+        ${selectedOrder.stations.map(station => {
+          const st = STATIONS.find(x => x.id === station.stId);
+          return `<option value="station:${station.stId}" ${station.stId === selectedStation.stId ? 'selected' : ''}>${st?.icon || ''} ${escapeHtml(st?.name || 'Stanoviště')}</option>`;
+        }).join('')}
       </select>
     </div>
 
@@ -1725,10 +1820,15 @@ function addNoteModal() {
 function submitNote() {
   const text = document.getElementById('an-text').value.trim();
   if (!text) { showToast('⚠️ Vyplňte text poznámky'); return; }
+  const target = document.getElementById('an-target').value;
+  const targetStationId = target.startsWith('station:')
+    ? Number(target.split(':')[1])
+    : selectedStation.stId;
   PROD_NOTES.unshift({
     id: 'pn' + Date.now(),
     orderId: selectedOrder.id,
-    stationId: selectedStation.stId,
+    stationId: targetStationId,
+    targetScope: target === 'all' ? 'all' : 'station',
     type: document.getElementById('an-type').value,
     text,
     author: currentUser.name,
