@@ -1,0 +1,17 @@
+{
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "tsc && vite build",
+    "preview": "vite preview --host 0.0.0.0"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "vite": "^7.2.7"
+  },
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "name": "ezop3",
+  "description": "Modulární mobilní výrobní EZOP aplikace s kompatibilním Supabase app_state úložištěm."
+}

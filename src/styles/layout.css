@@ -1,0 +1,80 @@
+/* ── LOGIN ── */
+  #login-screen {
+    min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    background: radial-gradient(ellipse at 50% 0%, #1a3a2a 0%, #0a0a0a 60%);
+  }
+  .login-box {
+    width: min(340px, 100%); background: var(--card); border: 1px solid var(--border);
+    border-radius: 16px; padding: 36px 32px; box-shadow: 0 0 60px rgba(212,160,23,0.08);
+  }
+  .login-logo {
+    width: 64px; height: 64px; margin: 0 auto 16px;
+    background: linear-gradient(135deg, var(--gold), var(--teal));
+    border-radius: 14px; display: flex; align-items: center; justify-content: center; font-size: 28px;
+  }
+  .login-title { text-align: center; font-size: 22px; font-weight: 800; color: var(--gold); letter-spacing: 1px; }
+  .login-sub { text-align: center; font-size: 12px; color: var(--text2); margin-bottom: 28px; letter-spacing: 2px; text-transform: uppercase; }
+  .login-label { font-size: 11px; color: var(--text2); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px; }
+  .login-input {
+    width: 100%; background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius);
+    color: var(--text); font-size: 15px; padding: 12px 14px; margin-bottom: 14px; outline: none;
+    transition: border-color .2s;
+  }
+  .login-input:focus { border-color: var(--gold); }
+  .remember-row {
+    display: flex; align-items: center; gap: 9px; margin: -4px 0 16px;
+    color: var(--text2); font-size: 12px; cursor: pointer; user-select: none;
+  }
+  .remember-row input {
+    width: 16px; height: 16px; accent-color: var(--gold); cursor: pointer;
+  }
+  .login-btn {
+    width: 100%; background: linear-gradient(135deg, var(--gold), #b8860b);
+    border: none; border-radius: var(--radius); color: #0a0a0a;
+    font-size: 15px; font-weight: 800; padding: 14px; cursor: pointer;
+    letter-spacing: 1px; text-transform: uppercase; transition: opacity .2s;
+  }
+  .login-btn:hover { opacity: .9; }
+  .login-error { color: var(--red); font-size: 12px; text-align: center; margin-top: 10px; }
+
+  /* ── SHELL ── */
+  #app { display: none; flex-direction: column; min-height: 100vh; width: 100%; max-width: 100%; overflow-x: hidden; }
+  .topbar {
+    background: var(--card); border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; padding: 0 16px; height: 52px; gap: 12px; position: sticky; top: 0; z-index: 100; min-width: 0;
+  }
+  .topbar-logo { font-size: 18px; font-weight: 900; color: var(--gold); letter-spacing: 1px; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .topbar-logo span { color: var(--teal2); }
+  .topbar-user { font-size: 12px; color: var(--text2); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .role-badge {
+    font-size: 10px; font-weight: 700; padding: 3px 8px; border-radius: 20px;
+    text-transform: uppercase; letter-spacing: .5px; flex-shrink: 0;
+  }
+  .role-admin    { background: rgba(239,68,68,.15);   color: #ef4444; }
+  .role-dispatcher{ background: rgba(59,130,246,.15); color: #3b82f6; }
+  .role-tpv      { background: rgba(168,85,247,.15);  color: #a855f7; }
+  .role-management{ background: rgba(34,197,94,.15);  color: #22c55e; }
+  .role-operator { background: rgba(153,153,153,.15); color: #999; }
+  .logout-btn {
+    background: none; border: 1px solid var(--border); border-radius: var(--radius);
+    color: var(--text2); font-size: 11px; padding: 5px 10px; cursor: pointer; flex-shrink: 0;
+  }
+  .logout-btn:hover { border-color: var(--red); color: var(--red); }
+
+  /* ── NAV TABS ── */
+  .navtabs {
+    background: var(--bg2); border-bottom: 1px solid var(--border);
+    display: flex; overflow-x: auto; gap: 0; padding: 0 8px;
+  }
+  .navtab {
+    padding: 12px 16px; font-size: 12px; font-weight: 600; color: var(--text2);
+    border-bottom: 2px solid transparent; cursor: pointer; white-space: nowrap;
+    text-transform: uppercase; letter-spacing: .5px; transition: color .2s;
+  }
+  .navtab:hover { color: var(--text); }
+  .navtab.active { color: var(--gold); border-bottom-color: var(--gold); }
+  .navtab .tab-icon { margin-right: 5px; }
+
+  /* ── CONTENT ── */
+  .page { display: none; padding: 16px; max-width: 900px; margin: 0 auto; width: 100%; min-width: 0; }
+  .page.active { display: block; }
