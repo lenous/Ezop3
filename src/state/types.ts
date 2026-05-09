@@ -1,5 +1,5 @@
 export type Role = 'admin' | 'dispatcher' | 'tpv' | 'management' | 'operator';
-export type StationStatus = 'waiting' | 'in_progress' | 'completed' | 'issue' | 'skipped';
+export type StationStatus = 'waiting' | 'in_progress' | 'partial' | 'completed' | 'issue' | 'skipped';
 export type Priority = 'low' | 'normal' | 'high' | 'urgent';
 export type Permission =
   | 'view_orders'

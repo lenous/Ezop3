@@ -208,6 +208,37 @@ function mergeUserProfiles(profiles) {
   });
 }
 
+const STATION_STATUS = {
+  waiting:     { label:'Příprava',          badge:'badge-waiting',  action:'reset', icon:'🧰' },
+  in_progress: { label:'Rozpracováno',      badge:'badge-progress', action:'start', icon:'▶' },
+  partial:     { label:'Částečně hotovo',   badge:'badge-progress', action:'start', icon:'◐' },
+  completed:   { label:'Hotovo',            badge:'badge-done',     action:'done',  icon:'✅' },
+  issue:       { label:'Problém',           badge:'badge-issue',    action:'issue', icon:'⚠️' },
+  skipped:     { label:'Přeskočeno',        badge:'badge-skipped',  action:'reset', icon:'↷' },
+};
+
+function stationStatusMeta(status) {
+  return STATION_STATUS[status] || STATION_STATUS.waiting;
+}
+
+function orderGoodQty(order) {
+  const maxOk = Math.max(0, ...order.stations.map(s => Number(s.qtyOk) || 0));
+  return Math.min(Number(order.qty) || 0, maxOk);
+}
+
+function validStencilNumber(value) {
+  return !String(value || '').trim() || /^\d+\/\d{4}$/.test(String(value).trim());
+}
+
+function normalizeLegacyStencilNumber(value) {
+  const map = {
+    'PL-VB300-R3': '3/0001',
+    'PL-PM24-001': '3/0002',
+    'PL-SR10-R2': '3/0003',
+  };
+  return map[String(value || '').trim()] || String(value || '').trim();
+}
+
 // ── APP SETTINGS (editable by admin) ──────────────────
 let APP_SETTINGS = {
   companyName: 'HC Electronics a.s.',
@@ -255,7 +286,7 @@ let ORDERS = [
   { id:'o1', number:'261100', name:'Řídicí deska VB-300', priority:'urgent', qty:150,
     customer:'HC Electronics a.s.', due:'2025-05-15',
     orderDate:'2025-05-01', technology:'bezolovo', productionType:'repeat',
-    stencilNumber:'PL-VB300-R3', documents:[
+    stencilNumber:'3/0001', documents:[
       {name:'BOM_VB300_v3.xlsx', type:'bom',     size:48000},
       {name:'OSAZ_VB300.pdf',    type:'drawing', size:120000},
     ],
@@ -274,7 +305,7 @@ let ORDERS = [
   { id:'o2', number:'261101', name:'Napájecí modul PM-24V', priority:'high', qty:300,
     customer:'TechCorp s.r.o.', due:'2025-05-20',
     orderDate:'2025-05-02', technology:'bezolovo', productionType:'new',
-    stencilNumber:'PL-PM24-001', documents:[{name:'BOM_PM24V.xlsx', type:'bom', size:32000}],
+    stencilNumber:'3/0002', documents:[{name:'BOM_PM24V.xlsx', type:'bom', size:32000}],
     stations: [
       { stId:1, status:'completed',   qtyOk:300, qtyRework:0,  qtyScrap:0, qtyReceived:300 },
       { stId:2, status:'in_progress', qtyOk:200, qtyRework:10, qtyScrap:2, qtyReceived:300 },
@@ -287,7 +318,7 @@ let ORDERS = [
   { id:'o3', number:'261102', name:'Senzorická PCB SR-10', priority:'normal', qty:500,
     customer:'AutoElektro k.s.', due:'2025-06-01',
     orderDate:'2025-05-03', technology:'olovo', productionType:'revision',
-    stencilNumber:'PL-SR10-R2', documents:[],
+    stencilNumber:'3/0003', documents:[],
     stations: [
       { stId:1, status:'completed', qtyOk:500, qtyRework:0,  qtyScrap:0,  qtyReceived:500 },
       { stId:2, status:'completed', qtyOk:495, qtyRework:5,  qtyScrap:0,  qtyReceived:500 },
@@ -711,7 +742,7 @@ function issueCardHtml(i, canResolve) {
 // ── DASHBOARD ─────────────────────────────────────────
 function renderDashboard() {
   const total = ORDERS.length;
-  const inProg = ORDERS.filter(o => o.stations.some(s => s.status === 'in_progress')).length;
+  const inProg = ORDERS.filter(o => o.stations.some(s => ['in_progress','partial'].includes(s.status))).length;
   const issues = ORDERS.filter(o => o.stations.some(s => s.status === 'issue')).length;
   const done   = ORDERS.filter(o => o.stations.every(s => ['completed','skipped'].includes(s.status))).length;
   const urgent = ORDERS.filter(o => o.priority === 'urgent').length;
@@ -749,7 +780,7 @@ function renderDashboard() {
 
     <div class="card">
       <div class="card-title">⚡ Aktivní zakázky</div>
-      ${ORDERS.filter(o => o.stations.some(s => ['in_progress','issue'].includes(s.status))).map(o => {
+      ${ORDERS.filter(o => o.stations.some(s => ['in_progress','partial','issue'].includes(s.status))).map(o => {
         const done2 = o.stations.filter(s => s.status === 'completed').length;
         const pct = Math.round(done2 / o.stations.length * 100);
         const hasIssue = o.stations.some(s => s.status === 'issue');
@@ -803,7 +834,7 @@ let orderFilter = null; // 'in_progress' | 'urgent' | null
 function filterOrders(q) {
   let list = [...ORDERS];
   if (orderFilter === 'in_progress') {
-    list = list.filter(o => o.stations.some(s => s.status === 'in_progress'));
+    list = list.filter(o => o.stations.some(s => ['in_progress','partial'].includes(s.status)));
   } else if (orderFilter === 'urgent') {
     list = list.filter(o => o.priority === 'urgent');
   }
@@ -914,7 +945,7 @@ function openOrder(orderId, options = {}) {
   const pg = document.getElementById('page-station');
   pg.classList.add('active');
 
-  const totalOk = selectedOrder.stations.reduce((a,s) => a + s.qtyOk, 0);
+  const totalOk = orderGoodQty(selectedOrder);
   const doneSt  = selectedOrder.stations.filter(s=>s.status==='completed').length;
   const pct     = Math.round(doneSt / selectedOrder.stations.length * 100);
 
@@ -962,14 +993,7 @@ function openOrder(orderId, options = {}) {
     </div>
     ${selectedOrder.stations.map(s => {
       const stInfo = STATIONS.find(x => x.id === s.stId);
-      const statusClass = {
-        completed:'badge-done', in_progress:'badge-progress', waiting:'badge-waiting',
-        issue:'badge-issue', skipped:'badge-skipped'
-      }[s.status] || 'badge-waiting';
-      const statusLbl = {
-        completed:'Dokončeno', in_progress:'Probíhá', waiting:'Čeká',
-        issue:'Problém', skipped:'Přeskočeno'
-      }[s.status] || s.status;
+      const meta = stationStatusMeta(s.status);
       const nCount = stationNotes(selectedOrder.id, s.stId).length;
       return `<div class="card" style="cursor:pointer;margin-bottom:8px" onclick="openStation('${selectedOrder.id}','${s.stId}')">
         <div style="display:flex;align-items:center;gap:12px">
@@ -979,7 +1003,7 @@ function openOrder(orderId, options = {}) {
               <span style="font-size:14px;font-weight:700">${stInfo?.name ?? 'Stanoviště'}</span>
               <div style="display:flex;align-items:center;gap:6px">
                 ${nCount ? `<span style="font-size:10px;color:var(--teal2);background:rgba(34,184,158,.15);padding:2px 7px;border-radius:10px">📝 ${nCount}</span>` : ''}
-                <span class="badge ${statusClass}">${statusLbl}</span>
+                <span class="badge ${meta.badge}">${meta.label}</span>
               </div>
             </div>
             ${s.qtyReceived > 0 ? `<div style="display:flex;gap:12px;font-size:11px">
@@ -1140,7 +1164,10 @@ function editOrderInfoModal(orderId) {
     </div>
     <div class="input-group">
       <div class="input-label">Číslo planžety</div>
-      <input class="input" id="eoi-stencil" value="${escapeHtml(o.stencilNumber || '')}">
+      <input class="input" id="eoi-stencil" value="${escapeHtml(o.stencilNumber || '')}" placeholder="např. 3/0001" inputmode="numeric" pattern="\\d+/\\d{4}">
+      <div style="font-size:10px;color:var(--text3);margin-top:5px">
+        Formát: číslo lomítko čtyři číslice, např. 3/0001.
+      </div>
     </div>
   `, [
     { label:'Zrušit', action:'closeModal()', cls:'btn-ghost' },
@@ -1152,6 +1179,11 @@ function saveOrderInfo(orderId) {
   if (!can('edit_order_info')) return;
   const o = ORDERS.find(x => x.id === orderId);
   if (!o) return;
+  const stencil = document.getElementById('eoi-stencil').value.trim();
+  if (!validStencilNumber(stencil)) {
+    showToast('⚠️ Číslo planžety musí být ve formátu 3/0001');
+    return;
+  }
   o.purchaseOrderNumber = document.getElementById('eoi-po').value.trim();
   o.name = document.getElementById('eoi-name').value.trim() || o.name;
   o.customer = document.getElementById('eoi-customer').value.trim() || o.customer;
@@ -1161,7 +1193,7 @@ function saveOrderInfo(orderId) {
   o.due = document.getElementById('eoi-due').value || '';
   o.technology = document.getElementById('eoi-tech').value;
   o.productionType = document.getElementById('eoi-pt').value;
-  o.stencilNumber = document.getElementById('eoi-stencil').value.trim();
+  o.stencilNumber = stencil;
   applyProductMemoryToOrder(o);
   updateProductMemory(o);
   closeModal();
@@ -1372,11 +1404,7 @@ function openStation(orderId, stId, options = {}) {
 
 function renderStationDetail(stInfo) {
   const s = selectedStation;
-  const statusClass = {
-    completed:'badge-done', in_progress:'badge-progress', waiting:'badge-waiting',
-    issue:'badge-issue', skipped:'badge-skipped'
-  }[s.status] || 'badge-waiting';
-  const statusLbl = { completed:'Dokončeno', in_progress:'Probíhá', waiting:'Čeká', issue:'Problém', skipped:'Přeskočeno' }[s.status];
+  const statusMeta = stationStatusMeta(s.status);
 
   const pg = document.getElementById('page-station');
   pg.innerHTML = `
@@ -1392,7 +1420,7 @@ function renderStationDetail(stInfo) {
         <div style="font-size:16px;font-weight:800;color:var(--text)">${stInfo?.name ?? 'Stanoviště'}</div>
         <div style="font-size:12px;color:var(--text2)">${selectedOrder.name}</div>
       </div>
-      <span class="badge ${statusClass}" style="margin-left:auto">${statusLbl}</span>
+      <span class="badge ${statusMeta.badge}" style="margin-left:auto">${statusMeta.label}</span>
     </div>
 
     ${productPhotoCardHtml(selectedOrder, true)}
@@ -1408,8 +1436,7 @@ function renderStationDetail(stInfo) {
       </div>
       <div id="qty-summary"></div>
       <div style="display:flex;gap:8px;margin-top:12px">
-        <button class="btn btn-ghost" style="flex:1" onclick="resetQty()">↩ Reset</button>
-        <button class="btn btn-teal" id="qty-save-btn" style="flex:2" onclick="saveQty()">💾 Uložit počty</button>
+        <button class="btn btn-teal" id="qty-save-btn" style="width:100%" onclick="saveQty()">💾 Uložit počty</button>
       </div>
     </div>
 
@@ -1417,17 +1444,12 @@ function renderStationDetail(stInfo) {
     <div class="card">
       <div class="card-title">🔄 Změnit stav</div>
       <div class="action-grid">
-        ${s.status !== 'in_progress' && s.status !== 'completed' ?
-          `<button class="action-btn start" onclick="setStatus('in_progress')">▶ Zahájit</button>` : ''}
-        ${s.status === 'in_progress' ?
-          `<button class="action-btn done" onclick="setStatus('completed')">✅ Dokončit</button>` : ''}
-        ${s.status === 'completed' ?
-          `<button class="action-btn start" onclick="setStatus('in_progress')">↻ Znovu otevřít</button>` : ''}
-        ${s.status !== 'completed' ?
-          `<button class="action-btn issue" onclick="setStatus('issue')">⚠️ Problém</button>` : ''}
-        ${s.status !== 'waiting' ?
-          `<button class="action-btn reset" onclick="setStatus('waiting')">↺ Reset</button>` : ''}
+        ${stationStatusButton('waiting', '🧰 Příprava')}
+        ${stationStatusButton('in_progress', '▶ Rozpracováno')}
+        ${stationStatusButton('partial', '◐ Částečně hotovo')}
+        ${stationStatusButton('completed', '✅ Hotovo')}
       </div>
+      <button class="action-btn issue" style="margin-top:8px;width:100%;justify-content:center" onclick="reportIssueModal()">⚠️ Nahlásit problém</button>
     </div>
 
     <!-- PRODUCTION NOTES -->
@@ -1438,19 +1460,17 @@ function renderStationDetail(stInfo) {
       </div>
       ${renderStationNotes()}
     </div>
-
-    <!-- FORWARD -->
-    ${s.qtyOk > 0 ? `<div class="card">
-      <div class="card-title">→ Předat dál</div>
-      <div style="display:flex;align-items:center;gap:10px">
-        <div style="flex:1;font-size:13px;color:var(--text2)">
-          Předat ${s.qtyOk} OK kusů na další stanoviště
-        </div>
-        <button class="btn btn-primary btn-sm" onclick="forwardQtyModal()">Předat →</button>
-      </div>
-    </div>` : ''}
   `;
   updateQtySummary();
+}
+
+function stationStatusButton(status, label) {
+  const active = selectedStation?.status === status;
+  const meta = stationStatusMeta(status);
+  return `<button class="action-btn ${meta.action}" onclick="setStatus('${status}')"
+    style="${active ? 'border-color:var(--gold);color:var(--gold);background:rgba(212,160,23,.12)' : ''}">
+    ${label}
+  </button>`;
 }
 
 function qtyFieldHtml(field, label, val, colorClass) {
@@ -1532,9 +1552,11 @@ function saveQty() {
     showToast(`⛔ Nelze uložit: součet ${v.sum} ks > vydáno ${v.available} ks`);
     return;
   }
-  showToast('✅ Počty uloženy');
+  updateStationStatusFromQty(v);
+  const releaseMessage = autoReleaseToNextStation();
   const stInfo = STATIONS.find(x => x.id === selectedStation.stId);
   renderStationDetail(stInfo);
+  showToast(releaseMessage ? `✅ Počty uloženy. ${releaseMessage}` : '✅ Počty uloženy');
 }
 
 function resetQty() {
@@ -1550,7 +1572,53 @@ function setStatus(newStatus) {
   selectedStation.status = newStatus;
   const stInfo = STATIONS.find(x => x.id === selectedStation.stId);
   renderStationDetail(stInfo);
-  showToast('Stav změněn: ' + ({in_progress:'Probíhá',completed:'Dokončeno',waiting:'Čeká'}[newStatus]||newStatus));
+  showToast('Stav změněn: ' + stationStatusMeta(newStatus).label);
+}
+
+function updateStationStatusFromQty(validation = qtyValidation()) {
+  if (!selectedStation) return;
+  if (validation.sum === 0) selectedStation.status = 'waiting';
+  else if (validation.remaining === 0) selectedStation.status = 'completed';
+  else selectedStation.status = 'partial';
+}
+
+function nextStationAfterCurrent() {
+  if (!selectedOrder || !selectedStation) return null;
+  const sorted = [...selectedOrder.stations].sort((a,b) => a.stId - b.stId);
+  const idx = sorted.findIndex(s => s.stId === selectedStation.stId);
+  return idx >= 0 ? sorted[idx + 1] : null;
+}
+
+function notifyNextStation(nextStation, qtyOk) {
+  const source = STATIONS.find(x => x.id === selectedStation.stId);
+  const target = STATIONS.find(x => x.id === nextStation.stId);
+  const autoKey = `auto-ready:${selectedOrder.id}:${selectedStation.stId}:${nextStation.stId}:${qtyOk}`;
+  if (PROD_NOTES.some(n => n.autoKey === autoKey)) return;
+  PROD_NOTES.unshift({
+    id: 'pn' + Date.now(),
+    autoKey,
+    orderId: selectedOrder.id,
+    stationId: nextStation.stId,
+    type: 'info',
+    text: `${qtyOk} OK kusů ze stanoviště ${source?.name || selectedStation.stId} je hotovo. Lze pokračovat na stanovišti ${target?.name || nextStation.stId}.`,
+    author: 'Systém',
+    authorRole: 'admin',
+    createdAt: new Date().toISOString(),
+  });
+}
+
+function autoReleaseToNextStation() {
+  const qtyOk = Number(selectedStation?.qtyOk) || 0;
+  if (!qtyOk) return '';
+  const next = nextStationAfterCurrent();
+  if (!next) return 'Zakázka nemá další stanoviště.';
+  const previousReceived = Number(next.qtyReceived) || 0;
+  if (qtyOk <= previousReceived) return '';
+  next.qtyReceived = qtyOk;
+  if (next.status === 'skipped') next.status = 'waiting';
+  notifyNextStation(next, qtyOk);
+  const target = STATIONS.find(x => x.id === next.stId);
+  return `${target?.name || 'další stanoviště'} dostalo upozornění (${qtyOk} ks).`;
 }
 
 // ── PRODUCTION NOTES ──────────────────────────────────
@@ -1817,7 +1885,7 @@ function numConfirm() {
 
 // ── KPI ───────────────────────────────────────────────
 function renderKpi() {
-  const totalOk = ORDERS.reduce((a,o) => a + o.stations.reduce((b,s) => b+s.qtyOk,0),0);
+  const totalOk = ORDERS.reduce((a,o) => a + orderGoodQty(o),0);
   const totalScrap = ORDERS.reduce((a,o) => a + o.stations.reduce((b,s) => b+s.qtyScrap,0),0);
   const totalRework = ORDERS.reduce((a,o) => a + o.stations.reduce((b,s) => b+s.qtyRework,0),0);
   const totalQty = ORDERS.reduce((a,o) => a+o.qty,0);
@@ -1867,7 +1935,7 @@ function renderKpi() {
         <thead><tr><th>Zakázka</th><th>Plán</th><th>OK</th><th>Oprava</th><th>Zmetek</th></tr></thead>
         <tbody>
           ${ORDERS.map(o => {
-            const ok = o.stations.reduce((a,s)=>a+s.qtyOk,0);
+            const ok = orderGoodQty(o);
             const rw = o.stations.reduce((a,s)=>a+s.qtyRework,0);
             const sc = o.stations.reduce((a,s)=>a+s.qtyScrap,0);
             return `<tr>
@@ -2276,6 +2344,7 @@ function updateProductMemory(order) {
 function normalizeAppData() {
   ORDERS.forEach(order => {
     order.purchaseOrderNumber ??= '';
+    order.stencilNumber = normalizeLegacyStencilNumber(order.stencilNumber || '');
     order.stationPrograms = order.stationPrograms || {};
     order.productPhotoDataUrl ??= '';
     order.documents = Array.isArray(order.documents) ? order.documents : [];
@@ -2384,7 +2453,10 @@ function newOrderModal() {
 
     <div class="input-group">
       <div class="input-label">Číslo planžety (stencil)</div>
-      <input class="input" id="nm-stencil" placeholder="např. PL-VB300-R3">
+      <input class="input" id="nm-stencil" placeholder="např. 3/0001" inputmode="numeric" pattern="\\d+/\\d{4}">
+      <div style="font-size:10px;color:var(--text3);margin-top:5px">
+        Formát: číslo lomítko čtyři číslice, např. 3/0001.
+      </div>
     </div>
 
     <div class="input-group">
@@ -2521,8 +2593,10 @@ function docTypeLabel(t) {
 function createOrder() {
   const name = document.getElementById('nm-name').value.trim();
   const customer = document.getElementById('nm-customer').value.trim();
+  const stencil = document.getElementById('nm-stencil').value.trim();
   if (!customer) { showToast('⚠️ Vyplňte zákazníka'); return; }
   if (!name)     { showToast('⚠️ Vyplňte název výrobku'); return; }
+  if (!validStencilNumber(stencil)) { showToast('⚠️ Číslo planžety musí být ve formátu 3/0001'); return; }
   const num = String(NEXT_ORDER_CODE++);
   const order = {
     id: 'o' + Date.now(),
@@ -2536,7 +2610,7 @@ function createOrder() {
     orderDate: new Date().toISOString().slice(0,10),
     technology: document.getElementById('nm-tech').value,
     productionType: document.getElementById('nm-pt').value,
-    stencilNumber: document.getElementById('nm-stencil').value.trim(),
+    stencilNumber: stencil,
     stationPrograms: {},
     productPhotoDataUrl: '',
     documents: [...pendingDocs],

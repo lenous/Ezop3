@@ -17,6 +17,10 @@ Výchozí dev server běží na [http://localhost:8084](http://localhost:8084).
 npm run build
 ```
 
+## GitHub Pages
+
+Repozitář obsahuje workflow `.github/workflows/deploy-pages.yml`. Po pushi do `main` se aplikace sestaví a nasadí na [https://lenous.github.io/Ezop3/](https://lenous.github.io/Ezop3/). Pokud se stránka po prvním pushi ještě nezobrazí, zkontrolujte v GitHubu `Settings → Pages`, že je zdroj nastavený na `GitHub Actions`.
+
 ## Data a Supabase
 
 První verze zachovává kompatibilitu s původní tabulkou `public.app_state` a řádkem `main`. Provozní data se ukládají ve stejném tvaru, aby šla načíst stávající data. Do cloudu se neposílají hesla, profily uživatelů ani lokální přihlašovací logy.

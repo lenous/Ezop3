@@ -1,5 +1,5 @@
 // EZOP 3 service worker
-const CACHE = 'ezop3-v1';
+const CACHE = 'ezop3-v2';
 const ASSETS = [
   './',
   './index.html',
@@ -26,7 +26,7 @@ self.addEventListener('fetch', e => {
   const url = new URL(req.url);
 
   // Network-first pro hlavni aplikaci, aby mobil nezustal na stare verzi index.html.
-  if (req.mode === 'navigate' || url.pathname.endsWith('/index.html') || url.pathname.endsWith('/VyrobaIS/')) {
+  if (req.mode === 'navigate' || url.pathname.endsWith('/index.html') || url.pathname.endsWith('/Ezop3/')) {
     e.respondWith(
       fetch(req).then(res => {
         if (res.ok && url.origin === location.origin) {
