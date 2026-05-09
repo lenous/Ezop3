@@ -522,6 +522,7 @@ function can(action) {
     edit_qty:       ['operator','tpv','dispatcher','management','admin'],
     change_status:  ['operator','tpv','dispatcher','management','admin'],
     create_order:   ['dispatcher','management','admin'],
+    manage_order_stations:['dispatcher','management','admin'],
     edit_order_info:['dispatcher','management','admin'],
     edit_product_memory:['operator','tpv','dispatcher','management','admin'],
     view_kpi:       ['dispatcher','management','admin'],
@@ -959,7 +960,7 @@ function openOrder(orderId, options = {}) {
 
     <div style="display:flex;align-items:center;justify-content:space-between;margin:16px 0 8px">
       <div style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:1px">Stanoviště výroby</div>
-      ${can('create_order') ? `<button class="btn btn-ghost btn-sm" onclick="manageStationsModal('${selectedOrder.id}')">⚙️ Spravovat</button>` : ''}
+      ${can('manage_order_stations') ? `<button class="btn btn-ghost btn-sm" onclick="manageStationsModal('${selectedOrder.id}')">⚙️ Spravovat</button>` : ''}
     </div>
     ${selectedOrder.stations.map(s => {
       const stInfo = STATIONS.find(x => x.id === s.stId);
@@ -1284,15 +1285,16 @@ function saveDocToOrder(orderId) {
 }
 
 function manageStationsModal(orderId) {
+  if (!can('manage_order_stations')) return;
   const o = ORDERS.find(x => x.id === orderId);
   if (!o) return;
   openModal('⚙️ Spravovat stanoviště zakázky', `
     <div style="font-size:12px;color:var(--text2);margin-bottom:12px">
-      Zapněte / vypněte stanoviště pro tuto zakázku. Vypnutá stanoviště se přeskočí.
+      Zapněte / vypněte stanoviště a určete jejich postupnost. Automatické předání půjde vždy na další aktivní stanoviště v tomto pořadí.
     </div>
     <div id="ms-list">${renderManageStationsList(o)}</div>
     <div style="font-size:10px;color:var(--text3);margin-top:10px">
-      💡 Stanoviště, které již má rozpracované kusy, nejde vypnout.
+      💡 Stanoviště, které již má rozpracované kusy, nejde vypnout. Pořadí lze změnit šipkami.
     </div>
   `, [
     { label:'Zavřít', action:'closeModal()', cls:'btn-ghost' },
@@ -1301,21 +1303,50 @@ function manageStationsModal(orderId) {
 }
 
 function renderManageStationsList(o) {
-  return STATIONS.map(st => {
-    const existing = o.stations.find(s => s.stId === st.id);
-    const sum = existing ? (existing.qtyOk + existing.qtyRework + existing.qtyScrap + existing.qtyReceived) : 0;
-    const hasProgress = sum > 0;
-    const on = !!existing && existing.status !== 'skipped';
-    return `<div style="display:flex;align-items:center;gap:10px;background:var(--card2);border:1px solid var(--border);border-radius:8px;padding:8px 10px;margin-bottom:6px">
+  const activeIds = o.stations.map(s => s.stId);
+  const activeRows = o.stations.map((existing, index) => {
+    const st = STATIONS.find(x => x.id === existing.stId) || { id:existing.stId, name:'Stanoviště', icon:'🔧' };
+    return manageStationRow(o, st, existing, index, activeIds.length);
+  }).join('');
+
+  const inactiveRows = STATIONS
+    .filter(st => !activeIds.includes(st.id))
+    .map(st => manageStationRow(o, st, null, -1, activeIds.length))
+    .join('');
+
+  return `
+    <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.8px;margin:0 0 6px">
+      Aktivní postupnost
+    </div>
+    ${activeRows || '<div style="font-size:12px;color:var(--text3);padding:10px">Žádná aktivní stanoviště.</div>'}
+    ${inactiveRows ? `
+      <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.8px;margin:12px 0 6px">
+        Vypnutá stanoviště
+      </div>
+      ${inactiveRows}
+    ` : ''}
+  `;
+}
+
+function manageStationRow(o, st, existing, index, activeCount) {
+  const sum = existing ? (existing.qtyOk + existing.qtyRework + existing.qtyScrap + existing.qtyReceived) : 0;
+  const hasProgress = sum > 0;
+  const on = !!existing && existing.status !== 'skipped';
+  return `<div style="display:flex;align-items:center;gap:8px;background:var(--card2);border:1px solid var(--border);border-radius:8px;padding:8px 10px;margin-bottom:6px">
+      ${on ? `<span style="width:20px;height:20px;border-radius:6px;background:rgba(212,160,23,.14);color:var(--gold);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800">${index + 1}</span>` : '<span style="width:20px"></span>'}
       <span style="font-size:18px">${st.icon}</span>
       <span style="flex:1;font-size:13px;font-weight:600;color:${on?'var(--text)':'var(--text3)'}">${st.name}</span>
       ${hasProgress ? `<span style="font-size:10px;color:var(--text2)">${existing.qtyOk} OK</span>` : ''}
+      ${on ? `
+        <button class="btn btn-ghost btn-sm" style="padding:5px 8px;opacity:${index === 0 ? '.35' : '1'}" ${index === 0 ? 'disabled' : `onclick="moveOrderStation('${o.id}', ${st.id}, -1)"`}>↑</button>
+        <button class="btn btn-ghost btn-sm" style="padding:5px 8px;opacity:${index === activeCount - 1 ? '.35' : '1'}" ${index === activeCount - 1 ? 'disabled' : `onclick="moveOrderStation('${o.id}', ${st.id}, 1)"`}>↓</button>
+      ` : ''}
       <div class="toggle ${on?'on':''}" ${hasProgress && on ? 'title="Nelze vypnout – má rozpracované kusy" style="opacity:.4;cursor:not-allowed"' : `onclick="toggleOrderStation('${o.id}', ${st.id})"`}></div>
     </div>`;
-  }).join('');
 }
 
 function toggleOrderStation(orderId, stId) {
+  if (!can('manage_order_stations')) return;
   const o = ORDERS.find(x => x.id === orderId);
   if (!o) return;
   const existing = o.stations.find(s => s.stId === stId);
@@ -1338,11 +1369,23 @@ function toggleOrderStation(orderId, stId) {
     o.stations.push({
       stId, status:'waiting', qtyOk:0, qtyRework:0, qtyScrap:0, qtyReceived:0,
     });
-    o.stations.sort((a,b) => a.stId - b.stId);
     showToast('➕ Stanoviště přidáno');
   }
 
   document.getElementById('ms-list').innerHTML = renderManageStationsList(o);
+}
+
+function moveOrderStation(orderId, stId, direction) {
+  if (!can('manage_order_stations')) return;
+  const o = ORDERS.find(x => x.id === orderId);
+  if (!o) return;
+  const index = o.stations.findIndex(s => s.stId === stId);
+  const target = index + direction;
+  if (index < 0 || target < 0 || target >= o.stations.length) return;
+  const [station] = o.stations.splice(index, 1);
+  o.stations.splice(target, 0, station);
+  document.getElementById('ms-list').innerHTML = renderManageStationsList(o);
+  showToast('Pořadí stanovišť změněno');
 }
 
 function removeDoc(orderId, idx) {
@@ -1552,9 +1595,8 @@ function updateStationStatusFromQty(validation = qtyValidation()) {
 
 function nextStationAfterCurrent() {
   if (!selectedOrder || !selectedStation) return null;
-  const sorted = [...selectedOrder.stations].sort((a,b) => a.stId - b.stId);
-  const idx = sorted.findIndex(s => s.stId === selectedStation.stId);
-  return idx >= 0 ? sorted[idx + 1] : null;
+  const idx = selectedOrder.stations.findIndex(s => s.stId === selectedStation.stId);
+  return idx >= 0 ? selectedOrder.stations[idx + 1] : null;
 }
 
 function notifyNextStation(nextStation, qtyReady) {
@@ -2239,6 +2281,7 @@ function renderProfile() {
         ['edit_qty','Zadávání počtů kusů'],
         ['change_status','Změna stavu stanoviště'],
         ['create_order','Vytváření zakázek'],
+        ['manage_order_stations','Správa a pořadí stanovišť'],
         ['edit_order_info','Úprava údajů zakázky'],
         ['edit_product_memory','Programy a fotky výrobku'],
         ['view_kpi','Přístup ke KPI'],

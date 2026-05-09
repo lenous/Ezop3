@@ -6,6 +6,7 @@ export type Permission =
   | 'edit_qty'
   | 'change_status'
   | 'create_order'
+  | 'manage_order_stations'
   | 'edit_order_info'
   | 'edit_product_memory'
   | 'view_kpi'
