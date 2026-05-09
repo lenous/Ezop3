@@ -1,5 +1,5 @@
 // EZOP 3 service worker
-const CACHE = 'ezop3-v3';
+const CACHE = 'ezop3-v4';
 const ASSETS = [
   './',
   './index.html',
