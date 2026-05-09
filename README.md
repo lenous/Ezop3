@@ -28,11 +28,14 @@ První verze zachovává kompatibilitu s původní tabulkou `public.app_state` a
 ## Struktura
 
 - `src/main.ts` skládá shell a spouští kompatibilní runtime.
+- `src/domain/productionFlow.ts` drží výrobní matematiku počtů, aby se nemusel kvůli každé změně otevírat velký runtime.
 - `src/styles/` drží rozdělené CSS.
 - `src/state/` obsahuje typy a store API.
 - `src/services/` obsahuje storage/Supabase/PWA facady.
 - `src/auth/` obsahuje session a role/permissions API.
 - `src/features/` je připravené pro postupný přesun render logiky z legacy runtime.
+
+Rychlá mapa pro úpravy je v `docs/CODEMAP.md`.
 
 ## PWA
 

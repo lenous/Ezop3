@@ -222,8 +222,7 @@ function stationStatusMeta(status) {
 }
 
 function orderGoodQty(order) {
-  const maxOk = Math.max(0, ...order.stations.map(s => Number(s.qtyOk) || 0));
-  return Math.min(Number(order.qty) || 0, maxOk);
+  return window.EZOP_FLOW?.orderGoodQty(order) ?? 0;
 }
 
 function validStencilNumber(value) {
@@ -1482,15 +1481,13 @@ function qtyFieldHtml(field, label, val, colorClass) {
 }
 
 function qtyAvailable() {
-  // První stanoviště nemá qtyReceived – odpovídá objednanému množství
-  return selectedStation.qtyReceived > 0 ? selectedStation.qtyReceived : selectedOrder.qty;
+  return window.EZOP_FLOW?.qtyAvailable(selectedOrder, selectedStation) ?? 0;
 }
 
 function qtyValidation() {
-  const s = selectedStation;
-  const sum = (s.qtyOk||0) + (s.qtyRework||0) + (s.qtyScrap||0);
-  const available = qtyAvailable();
-  return { sum, available, exceed: sum > available, remaining: available - sum };
+  return window.EZOP_FLOW?.qtyValidation(selectedOrder, selectedStation) ?? {
+    sum: 0, available: 0, exceed: false, remaining: 0,
+  };
 }
 
 function updateQtySummary() {
@@ -1589,10 +1586,10 @@ function nextStationAfterCurrent() {
   return idx >= 0 ? sorted[idx + 1] : null;
 }
 
-function notifyNextStation(nextStation, qtyOk) {
+function notifyNextStation(nextStation, qtyReady) {
   const source = STATIONS.find(x => x.id === selectedStation.stId);
   const target = STATIONS.find(x => x.id === nextStation.stId);
-  const autoKey = `auto-ready:${selectedOrder.id}:${selectedStation.stId}:${nextStation.stId}:${qtyOk}`;
+  const autoKey = `auto-ready:${selectedOrder.id}:${selectedStation.stId}:${nextStation.stId}:${qtyReady}`;
   if (PROD_NOTES.some(n => n.autoKey === autoKey)) return;
   PROD_NOTES.unshift({
     id: 'pn' + Date.now(),
@@ -1600,7 +1597,7 @@ function notifyNextStation(nextStation, qtyOk) {
     orderId: selectedOrder.id,
     stationId: nextStation.stId,
     type: 'info',
-    text: `${qtyOk} OK kusů ze stanoviště ${source?.name || selectedStation.stId} je hotovo. Lze pokračovat na stanovišti ${target?.name || nextStation.stId}.`,
+    text: `${qtyReady} kusů ze stanoviště ${source?.name || selectedStation.stId} je připraveno. Lze pokračovat na stanovišti ${target?.name || nextStation.stId}.`,
     author: 'Systém',
     authorRole: 'admin',
     createdAt: new Date().toISOString(),
@@ -1608,17 +1605,17 @@ function notifyNextStation(nextStation, qtyOk) {
 }
 
 function autoReleaseToNextStation() {
-  const qtyOk = Number(selectedStation?.qtyOk) || 0;
-  if (!qtyOk) return '';
+  const qtyReady = window.EZOP_FLOW?.readyForNextStation(selectedStation) ?? 0;
+  if (!qtyReady) return '';
   const next = nextStationAfterCurrent();
   if (!next) return 'Zakázka nemá další stanoviště.';
   const previousReceived = Number(next.qtyReceived) || 0;
-  if (qtyOk <= previousReceived) return '';
-  next.qtyReceived = qtyOk;
+  if (qtyReady <= previousReceived) return '';
+  next.qtyReceived = qtyReady;
   if (next.status === 'skipped') next.status = 'waiting';
-  notifyNextStation(next, qtyOk);
+  notifyNextStation(next, qtyReady);
   const target = STATIONS.find(x => x.id === next.stId);
-  return `${target?.name || 'další stanoviště'} dostalo upozornění (${qtyOk} ks).`;
+  return `${target?.name || 'další stanoviště'} dostalo upozornění (${qtyReady} ks).`;
 }
 
 // ── PRODUCTION NOTES ──────────────────────────────────
