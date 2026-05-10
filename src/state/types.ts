@@ -18,7 +18,27 @@ export interface AppSettings { companyName: string; lockTimeout: number; allowOp
 export interface StationProgress { stId: number; status: StationStatus; qtyOk: number; qtyRework: number; qtyScrap: number; qtyReceived: number; }
 export interface OrderDocument { name: string; type: string; size: number; }
 export interface Order { id: string; number: string; name: string; priority: Priority; qty: number; customer: string; due: string; orderDate: string; technology: string; productionType: string; stencilNumber: string; purchaseOrderNumber?: string; stationPrograms?: Record<string, string>; productPhotoDataUrl?: string; documents: OrderDocument[]; stations: StationProgress[]; }
-export interface Issue { id: string; orderId: string; stationId: number; severity: string; description: string; reportedBy: string; reportedAt: string; resolved?: boolean; }
+export interface Issue {
+  id: string;
+  orderId: string;
+  stationId: number;
+  severity: string;
+  description: string;
+  reportedBy: string;
+  reportedByUserId?: string;
+  reportedByLogin?: string;
+  reportedByRole?: Role;
+  targetScope?: 'all' | 'roles' | 'user';
+  targetRoles?: Role[];
+  targetUserIds?: string[];
+  targetLogins?: string[];
+  targetLabel?: string;
+  autoKey?: string;
+  reportedAt: string;
+  resolved?: boolean;
+  resolvedBy?: string;
+  resolvedAt?: string;
+}
 export interface ProductionNote { id: string; orderId: string; stationId: number; type: string; text: string; author: string; authorRole: Role; createdAt: string; }
 export interface ProductMemoryEntry { customer: string; name: string; stationPrograms: Record<string, string>; photoDataUrl: string; updatedAt: string; }
 export type ProductMemory = Record<string, ProductMemoryEntry>;

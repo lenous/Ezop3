@@ -704,6 +704,7 @@ function issueCardHtml(i, canResolve) {
   const time = new Date(i.reportedAt);
   const ago  = Math.round((Date.now() - time.getTime()) / 60000);
   const agoTxt = ago < 1 ? 'právě teď' : ago < 60 ? `před ${ago} min` : `před ${Math.round(ago/60)} h`;
+  const recipient = issueRecipientLabel(i);
 
   return `<div class="card" style="border-left:4px solid ${sevColor};${i.resolved?'opacity:.55':''};cursor:pointer" onclick="openIssueTarget('${i.id}')">
     <div style="display:flex;align-items:flex-start;gap:10px;margin-bottom:8px">
@@ -711,6 +712,7 @@ function issueCardHtml(i, canResolve) {
       <div style="flex:1">
         <div style="font-size:14px;font-weight:700;color:var(--text)">${i.stationName}</div>
         <div style="font-size:11px;color:var(--text2)">${i.orderName} · ${i.orderNumber}</div>
+        <div style="font-size:10px;color:var(--text3);margin-top:2px">📨 ${escapeHtml(recipient)}</div>
       </div>
       <span class="badge" style="background:${sevColor}22;color:${sevColor}">${sevLabel(i.severity)}</span>
     </div>
@@ -741,12 +743,95 @@ function openIssueTarget(issueId) {
   else showToast('Zakázka k problému už v aplikaci není.');
 }
 
+const ISSUE_DEFAULT_TARGET = 'roles:admin,dispatcher,management';
+
+function issueRecipientOptionsHtml() {
+  const roleOptions = [
+    [ISSUE_DEFAULT_TARGET, 'Admin + mistr + vedení'],
+    ['roles:admin,dispatcher,management,tpv', 'Admin + mistr + vedení + TPV'],
+    ['roles:dispatcher', 'Mistr'],
+    ['roles:management', 'Vedení'],
+    ['roles:tpv', 'TPV'],
+    ['roles:admin', 'Admin'],
+    ['roles:all', 'Všichni uživatelé'],
+  ].map(([value, label]) =>
+    `<option value="${escapeHtml(value)}">${escapeHtml(label)}</option>`
+  ).join('');
+
+  const users = USERS
+    .filter(u => u.id !== currentUser?.id)
+    .map(u => {
+      const lockedRole = BUILTIN_USER_ROLES[normalizeLogin(u.login)] || u.role;
+      const roleLabel = ROLE_LABELS[lockedRole] || lockedRole;
+      return `<option value="user:${escapeHtml(u.id)}">${escapeHtml(u.name)} · ${escapeHtml(roleLabel)}</option>`;
+    }).join('');
+
+  return `
+    <optgroup label="Role a skupiny">${roleOptions}</optgroup>
+    ${users ? `<optgroup label="Konkrétní uživatel">${users}</optgroup>` : ''}
+  `;
+}
+
+function parseIssueTarget(value) {
+  const raw = value || ISSUE_DEFAULT_TARGET;
+  if (raw === 'roles:all') return { targetScope: 'all', targetLabel: 'všichni uživatelé' };
+  if (raw.startsWith('roles:')) {
+    const roles = raw.slice(6).split(',').map(r => r.trim()).filter(Boolean);
+    return {
+      targetScope: 'roles',
+      targetRoles: roles,
+      targetLabel: roles.map(r => ROLE_LABELS[r] || r).join(', '),
+    };
+  }
+  if (raw.startsWith('user:')) {
+    const id = raw.slice(5);
+    const user = USERS.find(u => u.id === id);
+    if (user) {
+      return {
+        targetScope: 'user',
+        targetUserIds: [user.id],
+        targetLogins: [normalizeLogin(user.login)],
+        targetLabel: user.name,
+      };
+    }
+  }
+  return parseIssueTarget(ISSUE_DEFAULT_TARGET);
+}
+
+function issueRecipientLabel(issue) {
+  if (issue.targetLabel) return issue.targetLabel;
+  if (issue.targetScope === 'all') return 'všichni uživatelé';
+  if (Array.isArray(issue.targetUserIds) && issue.targetUserIds.length) {
+    return issue.targetUserIds
+      .map(id => USERS.find(u => u.id === id)?.name)
+      .filter(Boolean)
+      .join(', ') || 'konkrétní uživatel';
+  }
+  if (Array.isArray(issue.targetLogins) && issue.targetLogins.length) {
+    return issue.targetLogins
+      .map(login => USERS.find(u => normalizeLogin(u.login) === normalizeLogin(login))?.name || login)
+      .join(', ');
+  }
+  if (Array.isArray(issue.targetRoles) && issue.targetRoles.length) {
+    return issue.targetRoles.map(r => ROLE_LABELS[r] || r).join(', ');
+  }
+  return 'všichni uživatelé';
+}
+
+function userCanSeeIssue(issue) {
+  const login = normalizeLogin(currentUser?.login);
+  if (issue.reportedByUserId && issue.reportedByUserId === currentUser?.id) return true;
+  if (issue.reportedByLogin && normalizeLogin(issue.reportedByLogin) === login) return true;
+  if (!issue.reportedByUserId && !issue.reportedByLogin && issue.reportedBy === currentUser?.name) return true;
+  if (issue.targetScope === 'all') return true;
+  if (Array.isArray(issue.targetUserIds) && issue.targetUserIds.includes(currentUser?.id)) return true;
+  if (Array.isArray(issue.targetLogins) && issue.targetLogins.map(normalizeLogin).includes(login)) return true;
+  if (Array.isArray(issue.targetRoles)) return issue.targetRoles.includes(currentUser?.role);
+  return true;
+}
+
 function visibleIssues() {
-  return ISSUES.filter(issue =>
-    !Array.isArray(issue.targetRoles) ||
-    issue.targetRoles.includes(currentUser?.role) ||
-    issue.reportedByRole === currentUser?.role
-  );
+  return ISSUES.filter(userCanSeeIssue);
 }
 
 // ── DASHBOARD ─────────────────────────────────────────
@@ -1885,13 +1970,20 @@ function reportIssueModal() {
     </div>
 
     <div class="input-group">
+      <div class="input-label">Komu poslat upozornění</div>
+      <select class="input" id="ri-target">
+        ${issueRecipientOptionsHtml()}
+      </select>
+    </div>
+
+    <div class="input-group">
       <div class="input-label">Popis problému *</div>
       <textarea class="input" id="ri-desc" rows="4" placeholder="Popište, co se stalo (povinné)..."
         style="resize:vertical;min-height:90px;font-family:inherit"></textarea>
     </div>
 
     <div style="background:var(--card2);border-radius:8px;padding:10px;font-size:11px;color:var(--text2);margin-top:6px">
-      ℹ️ Hlášení se zobrazí všem uživatelům a notifikuje vedoucího (mistr / vedení / admin).
+      ℹ️ Hlášení uvidí odesílatel a vybraný adresát. Pokud vyberete roli, upozornění se zobrazí všem uživatelům v dané roli.
     </div>
   `, [
     { label:'Zrušit', action:'closeModal()', cls:'btn-ghost' },
@@ -1907,6 +1999,7 @@ function submitIssue() {
     return;
   }
   const severity = document.getElementById('ri-severity').value;
+  const target = parseIssueTarget(document.getElementById('ri-target')?.value);
   const stInfo = STATIONS.find(x => x.id === selectedStation.stId);
 
   ISSUES.unshift({
@@ -1920,7 +2013,10 @@ function submitIssue() {
     severity,
     description: desc || '(bez popisu)',
     reportedBy: currentUser.name,
+    reportedByUserId: currentUser.id,
+    reportedByLogin: currentUser.login,
     reportedByRole: currentUser.role,
+    ...target,
     reportedAt: new Date().toISOString(),
     resolved: false,
   });
@@ -1928,7 +2024,8 @@ function submitIssue() {
   selectedStation.status = 'issue';
   closeModal();
   renderStationDetail(stInfo);
-  showToast('✅ Problém nahlášen vedoucímu (' + sevLabel(severity) + ')');
+  buildNav();
+  showToast('✅ Problém odeslán: ' + target.targetLabel + ' (' + sevLabel(severity) + ')');
 }
 
 function sevLabel(s) {
